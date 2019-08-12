@@ -3,12 +3,14 @@ from copy import deepcopy
 import tensorflow as tf
 import numpy as np
 import random as rand
+from pypokerengine.api.game import setup_config, start_poker
 
 from DQNPlayer import DQNPlayer
 from random_player import RandomPlayer
 from fold_player import FoldPlayer
 from honest_player import HonestPlayer
 from fish_player import FishPlayer
+from console_player import ConsolePlayer
 from my_emulator import MyEmulator
 
 
@@ -43,13 +45,13 @@ class Trainer:
     def __init__(self, batch_size=128, update_freq=50, discount=0.99, path=None, nb_players=5, load=False):
         self.batch_size = batch_size
         self.update_freq = update_freq
-        self.learning_rate = 0.001
+        self.learning_rate = 0.0001
         self.y = discount
         self.start_E = 1 # starting chance of random action
         self.end_E = 0.1 # final chance of random action
-        self.annealings_steps = 100_000 # how many steps to reduce start_E to end_E
-        self.num_episodes = 500_000
-        self.pre_train_steps = 5_000 # how many steps of random action before training begin
+        self.annealings_steps = 10000 # how many steps to reduce start_E to end_E
+        self.num_episodes = 10000
+        self.pre_train_steps = 5000 # how many steps of random action before training begin
         self.path = path
         self.tau = 0.01 # rate to update target network toward primary network
         self.nb_players = nb_players
@@ -60,8 +62,10 @@ class Trainer:
 
     def start(self):
         tf.reset_default_graph()
-        main_qn = DQNPlayer(learning_rate=self.learning_rate, discount=self.y, nb_players=self.nb_players, custom_uuid="1")
-        target_qn = DQNPlayer(learning_rate=self.learning_rate, discount=self.y, nb_players=self.nb_players)
+        main_qn = DQNPlayer(learning_rate=self.learning_rate, discount=self.y, nb_players=self.nb_players,
+                            start_stack=1500, custom_uuid="1")
+        target_qn = DQNPlayer(learning_rate=self.learning_rate, discount=self.y, nb_players=self.nb_players,
+                              start_stack=1500)
 
         init = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
@@ -74,6 +78,7 @@ class Trainer:
 
         jList = []
         rList = []
+        action_list = []
         total_steps = 0
 
         self.emulator.set_game_rule(player_num=self.nb_players, max_round=15, small_blind_amount=5, ante_amount=0)
@@ -87,7 +92,7 @@ class Trainer:
             sess.run(init)
             main_qn.set_session(sess)
             if self.load:
-                self.saver.restore(sess, tf.train.get_checkpoint_state(self.path))
+                self.saver.restore(sess, self.path + self.load)
             for i in range(self.num_episodes):
                 episode_buffer = experience_buffer()
                 init_state = self.emulator.generate_initial_game_state({
@@ -104,18 +109,18 @@ class Trainer:
                 prev_inputs = None
                 prev_action = None
                 last_round = False
-                action_list = []
                 j = 0
 
                 while not last_round:
+                    j += 1
                     params = self.emulator.run_until_my_next_action(game_state, "1", msgs)
 
                     if len(params) == 4:
                         game_state, valid_actions, hole_card, round_state = params
-                        action, amount = main_qn.declare_action(valid_actions, hole_card, round_state)
+                        action_idx, action, amount = main_qn.declare_action_emul(valid_actions, hole_card, round_state)
 
                         if np.random.rand(1) < e or total_steps < self.pre_train_steps:
-                            action, amount = main_qn.select_action(valid_actions, np.random.randint(0, main_qn.nb_outputs))
+                            action_idx, action, amount = main_qn.select_action(valid_actions, np.random.randint(0, main_qn.nb_outputs))
 
                         game_state, msgs = self.emulator.apply_my_action(game_state, action, amount)
                         total_steps += 1
@@ -129,8 +134,8 @@ class Trainer:
                             )
 
                         prev_inputs = main_qn.inputs
-                        prev_action = action
-                        action_list.append(action)
+                        prev_action = action_idx
+                        action_list.append(action_idx)
                         if total_steps > self.pre_train_steps:
                             if e > self.end_E:
                                 e -= stepDrop
@@ -139,7 +144,7 @@ class Trainer:
                                 Q1 = sess.run(main_qn.predict,
                                               feed_dict={main_qn.input_layer: np.vstack(train_batch[:, 3])})
                                 Q2 = sess.run(target_qn.output_layer,
-                                              feed_dict={main_qn.input_layer: np.vstack(train_batch[:, 3])})
+                                              feed_dict={target_qn.input_layer: np.vstack(train_batch[:, 3])})
                                 end_multiplier = -(train_batch[:, 4] - 1)
                                 double_q = Q2[range(self.batch_size), Q1]
                                 target_q = train_batch[:, 2] + (self.y * double_q * end_multiplier)
@@ -154,7 +159,9 @@ class Trainer:
                                 r = np.mean(rList[-2:])
                                 j = np.mean(jList[-2:])
                                 q2 = double_q[0]
-                                al = np.mean(action_list)
+                                print(action_list)
+                                print(action_list[-10:])
+                                al = np.mean(action_list[-10:])
 
                                 summary = tf.Summary()
                                 summary.value.add(tag='Perf/Reward', simple_value=float(r))
@@ -170,7 +177,8 @@ class Trainer:
                                     main_qn.summary_writer.flush()
                     else:
                         game_state, reward = params
-                        reward = np.log(1 + reward) if reward >= 0 else -np.log(1 - reward)
+                        # reward = np.log(1 + reward) if reward >= 0 else -np.log(1 - reward)
+                        reward = reward / (self.nb_players * 1500)
                         rAll += reward
                         if prev_inputs:
                             episode_buffer.add(np.reshape(
@@ -181,13 +189,55 @@ class Trainer:
                         prev_inputs = None
                         prev_action = None
 
-            buffer.add(episode_buffer.buffer)
-            rList.append(rAll)
-            jList.append(j)
-            print(" -------- finished episode number: ---------------- ", i)
-            if i % 1000 == 0:
-                self.saver.save(sess, self.path+'/model-'+str(i)+'.ckpt')
-                print("Saved Model")
-            if len(rList) % 10 == 0:
-                print(total_steps,np.mean(rList[-10:]), e)
+                buffer.add(episode_buffer.buffer)
+                rList.append(rAll)
+                jList.append(j)
+                print(" -------- finished episode number: ---------------- ", i)
+                if i % 200 == 0:
+                    self.saver.save(sess, self.path+'/model-'+str(i)+'.ckpt')
+                    print("Saved Model")
+                if len(rList) % 10 == 0:
+                    print(total_steps,np.mean(rList[-10:]), e)
             self.saver.save(sess, self.path+'/model-'+str(i)+'.ckpt')
+
+    def start_real_game(self):
+        tf.reset_default_graph()
+        main_qn = DQNPlayer(learning_rate=self.learning_rate, discount=self.y, nb_players=self.nb_players, custom_uuid="1")
+
+        init = tf.global_variables_initializer()
+        self.saver = tf.train.Saver()
+
+        with tf.Session() as sess:
+            sess.run(init)
+            main_qn.set_session(sess)
+            ckpt = tf.train.get_checkpoint_state(self.path)
+            print(ckpt.model_checkpoint_path)
+            self.saver.restore(sess, ckpt.model_checkpoint_path)
+            config = setup_config(max_round=10, initial_stack=100, small_blind_amount=5)
+            config.register_player(name="p1", algorithm=FishPlayer())
+            config.register_player(name="p2", algorithm=RandomPlayer())
+            config.register_player(name="p3", algorithm=RandomPlayer())
+            config.register_player(name="p4", algorithm=RandomPlayer())
+            config.register_player(name="p5", algorithm=main_qn)
+            game_result = start_poker(config, verbose=1)
+            print(game_result)
+
+
+def setup_ai():
+    tf.reset_default_graph()
+    main_qn = DQNPlayer(learning_rate=0.001, discount=0.99, nb_players=3, load=True)
+    target_qn = DQNPlayer(learning_rate=0.001, discount=0.99, nb_players=3)
+    target_qn.set_session(main_qn)
+
+    init = tf.global_variables_initializer()
+    trainables = tf.trainable_variables()
+    Trainer.updateTargetGraph(trainables, 0.01)
+
+    saver = tf.train.Saver()
+    main_qn.session.run(init)
+    saver.restore(main_qn.session, './logs/model-1000.ckpt')
+    return main_qn
+
+
+if __name__ == '__main__':
+    setup_ai()

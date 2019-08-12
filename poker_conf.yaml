@@ -1,11 +1,13 @@
 ai_players:
 - name: player_1
-  path: ./src/fish_player.py
+  path: ./src/Trainer.py
 - name: player_2
-  path: ./src/fish_player.py
+  path: ./src/Trainer.py
+- name: player_3
+  path: ./src/Trainer.py
 ante: 0
 blind_structure: null
-initial_stack: 100
+initial_stack: 200
 max_round: 10
 small_blind: 10
 

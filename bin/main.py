@@ -18,3 +18,4 @@ from Trainer import Trainer
 trainer = Trainer(path='./logs')
 
 trainer.start()
+# trainer.start_real_game()
