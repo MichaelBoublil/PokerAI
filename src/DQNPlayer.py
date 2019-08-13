@@ -12,11 +12,16 @@ class DQNPlayer(BasePokerPlayer):
 
         self.nb_players = nb_players
         self.start_stack = start_stack
+        self.stack_begin_of_round = start_stack
+        self.agressivity = 0
+        self.overall_agressivity = 0
+        self.nb_actions_history = 0
+        self.call_amount = 10
         self.load = load
 
         self.learning_rate = learning_rate
         self.discount = discount
-        self.nb_inputs = 7 + (nb_players - 1)
+        self.nb_inputs = 8 + (nb_players - 1)
         self.nb_outputs = 5
 
         self.input_layer = tf.placeholder(dtype=tf.float32, shape=[None, self.nb_inputs])
@@ -62,7 +67,7 @@ class DQNPlayer(BasePokerPlayer):
 
         # TODO: add player type (aggressive, chill, ...)
 
-        return [hand_strength, *list(street.values()), pots, player_stack, *other_stacks]
+        return [hand_strength, self.overall_agressivity, *list(street.values()), pots, player_stack, *other_stacks]
 
     @staticmethod
     def select_action(valid_actions, action_idx):
@@ -101,14 +106,18 @@ class DQNPlayer(BasePokerPlayer):
 
         return action_idx, action, amount
 
+    def set_begin_round_stack(self, stack):
+        self.stack_begin_of_round = stack
+
     def receive_game_start_message(self, game_info):
-        pass
+        self.agressivity = 0
 
     def receive_round_start_message(self, round_count, hole_card, seats):
         pass
 
     def receive_street_start_message(self, street, round_state):
-        pass
+        if street != 0:
+            self.update_agressivity(round_state, street - 1)
 
     def receive_game_update_message(self, action, round_state):
         pass
@@ -116,7 +125,22 @@ class DQNPlayer(BasePokerPlayer):
     def receive_round_result_message(self, winners, hand_info, round_state):
         pass
 
+    def update_agressivity(self, round_state, old_street):
+        street_map = {0: 'preflop', 1: 'flop', 2: 'turn', 3: 'river'}
 
-def setup_ai():
-    return DQNPlayer(learning_rate=0.001, discount=0.99, nb_players=3)
+        actions_history = round_state['action_histories'][street_map[old_street]]
+        for action in actions_history:
+            if action['uuid'] == self.uuid:
+                continue
+
+            if action['action'] == 'FOLD' or action['action'] == 'CALL':
+                self.agressivity += 0 / self.call_amount if action['action'] == 'FOLD'\
+                    else action['amount'] / self.call_amount
+                self.nb_actions_history += 1
+            elif action['action'] == 'RAISE':
+                self.agressivity += action['amount'] / self.call_amount
+                self.nb_actions_history += 1
+                self.call_amount = action['amount']
+        self.overall_agressivity = self.agressivity / self.nb_actions_history
+        print('overall agressivity:', self.overall_agressivity)
 

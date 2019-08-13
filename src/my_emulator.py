@@ -16,11 +16,15 @@ class MyEmulator(Emulator):
             seats = round_state['seats']
             self.start_stack = [s['stack'] for s in seats if s['uuid'] == my_uuid][0]
 
+        actual_street = game_state['street']
         while game_state["street"] != Const.Street.FINISHED:
             next_player_pos = game_state["next_player"]
             next_player_uuid = game_state["table"].seats.players[next_player_pos].uuid
             next_player_algorithm = self.fetch_player(next_player_uuid)
             msg = MessageBuilder.build_ask_message(next_player_pos, game_state)["message"]
+            if actual_street != game_state['street']:
+                self.fetch_player(my_uuid).update_agressivity(msg['round_state'], actual_street)
+                actual_street = game_state['street']
             if next_player_uuid == my_uuid:
                 return game_state, msg["valid_actions"], msg["hole_card"], msg["round_state"]
 
@@ -36,10 +40,8 @@ class MyEmulator(Emulator):
         round_state = DataEncoder.encode_round_state(game_state)
         seats = round_state['seats']
         end_stack = [s['stack'] for s in seats if s['uuid'] == my_uuid][0]
-        #         print('finish, reward', end_stack - self.start_stack, end_stack)
 
         if self._is_last_round(game_state, self.game_rule):
-            #             print('last_round')
             events += self._generate_game_result_event(game_state)
 
         return game_state, end_stack - self.start_stack

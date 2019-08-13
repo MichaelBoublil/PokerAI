@@ -92,7 +92,9 @@ class Trainer:
             sess.run(init)
             main_qn.set_session(sess)
             if self.load:
-                self.saver.restore(sess, self.path + self.load)
+                print('restoring model')
+                ckpt = tf.train.get_checkpoint_state(self.path)
+                self.saver.restore(sess, ckpt.model_checkpoint_path)
             for i in range(self.num_episodes):
                 episode_buffer = experience_buffer()
                 init_state = self.emulator.generate_initial_game_state({
@@ -103,6 +105,7 @@ class Trainer:
                     "5": {"name": "RandomPlayer", "stack": 1500},
                 })
                 game_state, events = self.emulator.start_new_round(init_state)
+                main_qn.set_begin_round_stack(game_state['table'].seats.players[0].stack)
                 rAll = 0
                 msgs = []
 
@@ -159,9 +162,8 @@ class Trainer:
                                 r = np.mean(rList[-2:])
                                 j = np.mean(jList[-2:])
                                 q2 = double_q[0]
-                                print(action_list)
-                                print(action_list[-10:])
-                                al = np.mean(action_list[-10:])
+                                al = np.mean(action_list[-50:])
+                                print(action_list[-50:])
 
                                 summary = tf.Summary()
                                 summary.value.add(tag='Perf/Reward', simple_value=float(r))
@@ -177,8 +179,9 @@ class Trainer:
                                     main_qn.summary_writer.flush()
                     else:
                         game_state, reward = params
-                        # reward = np.log(1 + reward) if reward >= 0 else -np.log(1 - reward)
-                        reward = reward / (self.nb_players * 1500)
+                        print('reward before process:', reward)
+                        reward = reward / main_qn.stack_begin_of_round if reward != 0 else 0
+                        print('reward for round after process:', reward)
                         rAll += reward
                         if prev_inputs:
                             episode_buffer.add(np.reshape(
@@ -186,6 +189,7 @@ class Trainer:
                             )
                         last_round = self.emulator._is_last_round(game_state, self.emulator.game_rule)
                         game_state, events = self.emulator.start_new_round(game_state)
+                        main_qn.set_begin_round_stack(game_state['table'].seats.players[0].stack)
                         prev_inputs = None
                         prev_action = None
 
@@ -194,15 +198,15 @@ class Trainer:
                 jList.append(j)
                 print(" -------- finished episode number: ---------------- ", i)
                 if i % 200 == 0:
-                    self.saver.save(sess, self.path+'/model-'+str(i)+'.ckpt')
+                    self.saver.save(sess, self.path+'/model_with_updated_reward_and_player_aggressiveness-'+str(i)+'.ckpt')
                     print("Saved Model")
                 if len(rList) % 10 == 0:
                     print(total_steps,np.mean(rList[-10:]), e)
-            self.saver.save(sess, self.path+'/model-'+str(i)+'.ckpt')
+            self.saver.save(sess, self.path+'/model_with_updated_reward_and_player_aggressiveness-'+str(i)+'.ckpt')
 
     def start_real_game(self):
         tf.reset_default_graph()
-        main_qn = DQNPlayer(learning_rate=self.learning_rate, discount=self.y, nb_players=self.nb_players, custom_uuid="1")
+        main_qn = DQNPlayer(learning_rate=self.learning_rate, discount=self.y, nb_players=self.nb_players, start_stack=1500)
 
         init = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
@@ -213,7 +217,7 @@ class Trainer:
             ckpt = tf.train.get_checkpoint_state(self.path)
             print(ckpt.model_checkpoint_path)
             self.saver.restore(sess, ckpt.model_checkpoint_path)
-            config = setup_config(max_round=10, initial_stack=100, small_blind_amount=5)
+            config = setup_config(max_round=10, initial_stack=1500, small_blind_amount=5)
             config.register_player(name="p1", algorithm=FishPlayer())
             config.register_player(name="p2", algorithm=RandomPlayer())
             config.register_player(name="p3", algorithm=RandomPlayer())

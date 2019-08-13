@@ -15,7 +15,7 @@ sys.path.insert(0, 'src/')
 
 from Trainer import Trainer
 
-trainer = Trainer(path='./logs')
+trainer = Trainer(path='./logs', load=True)
 
 trainer.start()
 # trainer.start_real_game()
