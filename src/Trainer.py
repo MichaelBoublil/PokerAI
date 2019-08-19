@@ -42,7 +42,7 @@ class Trainer:
         for op in op_holder:
             sess.run(op)
 
-    def __init__(self, batch_size=128, update_freq=50, discount=0.99, path=None, nb_players=5, load=False):
+    def __init__(self, batch_size=128, update_freq=50, discount=0.99, path=None, nb_players=5, max_rounds=10, start_stack=1500, load=False):
         self.batch_size = batch_size
         self.update_freq = update_freq
         self.learning_rate = 0.0001
@@ -50,22 +50,25 @@ class Trainer:
         self.start_E = 1 # starting chance of random action
         self.end_E = 0.1 # final chance of random action
         self.annealings_steps = 10000 # how many steps to reduce start_E to end_E
-        self.num_episodes = 10000
-        self.pre_train_steps = 5000 # how many steps of random action before training begin
+        self.num_episodes = 20000
+        self.pre_train_steps = 0 # how many steps of random action before training begin
         self.path = path
         self.tau = 0.01 # rate to update target network toward primary network
+
         self.nb_players = nb_players
+        self.max_rounds = max_rounds
+        self.start_stack = start_stack
 
         self.saver = None
         self.load = load
         self.emulator = MyEmulator()
 
-    def start(self):
+    def start(self, file=None):
         tf.reset_default_graph()
         main_qn = DQNPlayer(learning_rate=self.learning_rate, discount=self.y, nb_players=self.nb_players,
-                            start_stack=1500, custom_uuid="1")
+                            start_stack=self.start_stack, max_round=self.max_rounds, custom_uuid="1")
         target_qn = DQNPlayer(learning_rate=self.learning_rate, discount=self.y, nb_players=self.nb_players,
-                              start_stack=1500)
+                              start_stack=self.start_stack, max_round=self.max_rounds)
 
         init = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
@@ -81,9 +84,9 @@ class Trainer:
         action_list = []
         total_steps = 0
 
-        self.emulator.set_game_rule(player_num=self.nb_players, max_round=15, small_blind_amount=5, ante_amount=0)
+        self.emulator.set_game_rule(player_num=self.nb_players, max_round=self.max_rounds, small_blind_amount=5, ante_amount=0)
         self.emulator.register_player(uuid="1", player=main_qn)
-        self.emulator.register_player(uuid="2", player=FoldPlayer())
+        self.emulator.register_player(uuid="2", player=FishPlayer())
         self.emulator.register_player(uuid="3", player=FishPlayer())
         self.emulator.register_player(uuid="4", player=HonestPlayer(nb_players=self.nb_players))
         self.emulator.register_player(uuid="5", player=RandomPlayer())
@@ -93,16 +96,20 @@ class Trainer:
             main_qn.set_session(sess)
             if self.load:
                 print('restoring model')
-                ckpt = tf.train.get_checkpoint_state(self.path)
-                self.saver.restore(sess, ckpt.model_checkpoint_path)
-            for i in range(self.num_episodes):
+                if not file:
+                    ckpt = tf.train.get_checkpoint_state(self.path)
+                    self.saver.restore(sess, ckpt.model_checkpoint_path)
+                else:
+                    self.saver.restore(sess, self.path + file)
+
+            for i in range(0, self.num_episodes):
                 episode_buffer = experience_buffer()
                 init_state = self.emulator.generate_initial_game_state({
-                    "1": {"name": "DQNPlayer", "stack": 1500},
-                    "2": {"name": "FoldPlayer", "stack": 1500},
-                    "3": {"name": "FishPlayer", "stack": 1500},
-                    "4": {"name": "HonestPlayer", "stack": 1500},
-                    "5": {"name": "RandomPlayer", "stack": 1500},
+                    "1": {"name": "DQNPlayer", "stack": self.start_stack},
+                    "2": {"name": "FishPlayer1", "stack": self.start_stack},
+                    "3": {"name": "FishPlayer2", "stack": self.start_stack},
+                    "4": {"name": "HonestPlayer", "stack": self.start_stack},
+                    "5": {"name": "RandomPlayer", "stack": self.start_stack},
                 })
                 game_state, events = self.emulator.start_new_round(init_state)
                 main_qn.set_begin_round_stack(game_state['table'].seats.players[0].stack)
@@ -113,9 +120,9 @@ class Trainer:
                 prev_action = None
                 last_round = False
                 j = 0
+                nb_rounds = 0
 
                 while not last_round:
-                    j += 1
                     params = self.emulator.run_until_my_next_action(game_state, "1", msgs)
 
                     if len(params) == 4:
@@ -160,14 +167,14 @@ class Trainer:
                                 self.updateTarget(target_ops, sess)
 
                                 r = np.mean(rList[-2:])
-                                j = np.mean(jList[-2:])
+                                j_mean = np.mean(jList[-2:])
                                 q2 = double_q[0]
                                 al = np.mean(action_list[-50:])
                                 print(action_list[-50:])
 
                                 summary = tf.Summary()
                                 summary.value.add(tag='Perf/Reward', simple_value=float(r))
-                                summary.value.add(tag='Perf/Length', simple_value=float(j))
+                                summary.value.add(tag='Perf/Nb_rounds', simple_value=float(j_mean))
                                 summary.value.add(tag='Perf/Action_list', simple_value=al)
                                 summary.value.add(tag='Perf/E', simple_value=e)
                                 summary.value.add(tag='Q/Q2', simple_value=float(q2))
@@ -178,9 +185,28 @@ class Trainer:
                                 if total_steps % (self.update_freq * 2) == 0:
                                     main_qn.summary_writer.flush()
                     else:
+                        j += 1
                         game_state, reward = params
                         print('reward before process:', reward)
-                        reward = reward / main_qn.stack_begin_of_round if reward != 0 else 0
+                        # reward = reward / main_qn.stack_begin_of_round if reward != 0 else 0
+                        if reward != 0:
+                            new_reward = 0
+                            try:
+                                new_reward = reward / self.start_stack
+                            except Exception:
+                                new_reward = 0.5
+                            reward = new_reward * (self.max_rounds + 1 - j) if reward < 0 else new_reward * j
+                        else:
+                            if main_qn.stack_begin_of_round > 0:
+                                if main_qn.latest_ehs < 1.0 / self.nb_players:
+                                    reward = 5.0
+                                else:
+                                    reward = -5.0
+                            elif nb_rounds == 0:
+                                nb_rounds = j
+                        # last_round = self.emulator._is_last_round(game_state, self.emulator.game_rule)
+                        # if last_round:
+                        #     pass
                         print('reward for round after process:', reward)
                         rAll += reward
                         if prev_inputs:
@@ -195,18 +221,19 @@ class Trainer:
 
                 buffer.add(episode_buffer.buffer)
                 rList.append(rAll)
-                jList.append(j)
+                jList.append(nb_rounds)
                 print(" -------- finished episode number: ---------------- ", i)
                 if i % 200 == 0:
-                    self.saver.save(sess, self.path+'/model_with_updated_reward_and_player_aggressiveness-'+str(i)+'.ckpt')
+                    self.saver.save(sess, self.path+'/model_v5-'+str(i)+'.ckpt')
                     print("Saved Model")
                 if len(rList) % 10 == 0:
                     print(total_steps,np.mean(rList[-10:]), e)
-            self.saver.save(sess, self.path+'/model_with_updated_reward_and_player_aggressiveness-'+str(i)+'.ckpt')
+            self.saver.save(sess, self.path+'/model_v5-'+str(i)+'.ckpt')
 
-    def start_real_game(self):
+    def start_real_game(self, file=None):
         tf.reset_default_graph()
-        main_qn = DQNPlayer(learning_rate=self.learning_rate, discount=self.y, nb_players=self.nb_players, start_stack=1500)
+        main_qn = DQNPlayer(learning_rate=self.learning_rate, discount=self.y, nb_players=self.nb_players,
+                            start_stack=self.start_stack, max_round=self.max_rounds)
 
         init = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
@@ -214,17 +241,23 @@ class Trainer:
         with tf.Session() as sess:
             sess.run(init)
             main_qn.set_session(sess)
-            ckpt = tf.train.get_checkpoint_state(self.path)
-            print(ckpt.model_checkpoint_path)
-            self.saver.restore(sess, ckpt.model_checkpoint_path)
-            config = setup_config(max_round=10, initial_stack=1500, small_blind_amount=5)
-            config.register_player(name="p1", algorithm=FishPlayer())
+            if not file:
+                ckpt = tf.train.get_checkpoint_state(self.path)
+                self.saver.restore(sess, ckpt.model_checkpoint_path)
+            else:
+                self.saver.restore(sess, self.path + file)
+            config = setup_config(max_round=self.max_rounds, initial_stack=self.start_stack, small_blind_amount=5)
+            config.register_player(name="p1", algorithm=RandomPlayer())
             config.register_player(name="p2", algorithm=RandomPlayer())
             config.register_player(name="p3", algorithm=RandomPlayer())
             config.register_player(name="p4", algorithm=RandomPlayer())
+            # config.register_player(name="p1", algorithm=HonestPlayer(nb_players=self.nb_players))
+            # config.register_player(name="p2", algorithm=HonestPlayer(nb_players=self.nb_players))
+            # config.register_player(name="p3", algorithm=HonestPlayer(nb_players=self.nb_players))
+            # config.register_player(name="p4", algorithm=HonestPlayer(nb_players=self.nb_players))
             config.register_player(name="p5", algorithm=main_qn)
-            game_result = start_poker(config, verbose=1)
-            print(game_result)
+            game_result = start_poker(config, verbose=0)
+            return game_result
 
 
 def setup_ai():

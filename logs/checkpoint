@@ -1,0 +1,6 @@
+model_checkpoint_path: "model_v5-15600.ckpt"
+all_model_checkpoint_paths: "model_v5-14800.ckpt"
+all_model_checkpoint_paths: "model_v5-15000.ckpt"
+all_model_checkpoint_paths: "model_v5-15200.ckpt"
+all_model_checkpoint_paths: "model_v5-15400.ckpt"
+all_model_checkpoint_paths: "model_v5-15600.ckpt"
