@@ -1,3 +1,12 @@
+"""
+Credits: The code contained in this file doesn't belong to me. I modified it so that it would work out well with my
+algorithm, but most of the code has been taken from the repository TensorPoker, maintained by EvgenyKashin.
+link: https://www.github.com/EvgenyKashin/TensorPoker
+
+This code is not relevant for my AI. The main utility is to make the game run until my player has an action to do.
+It should be included in the native Emulator of PyPokerEngine but it's not the case, so someone fixed it.
+"""
+
 from pypokerengine.api.emulator import Emulator, RoundManager, MessageBuilder, Const, DataEncoder
 
 
