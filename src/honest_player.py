@@ -1,3 +1,9 @@
+"""
+Credits: This player model doesn't belong to me, the source code is available on the PyPokerEngine Repository
+link: https://github.com/ishikota/PyPokerEngine/tree/master/examples/players/honest_player.py
+"""
+
+
 from pypokerengine.players import BasePokerPlayer
 from pypokerengine.utils.card_utils import gen_cards, estimate_hole_card_win_rate
 

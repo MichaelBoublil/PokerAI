@@ -278,7 +278,7 @@ class DQNPlayerV5(DQNPlayer):
         return [self.latest_ehs, 0, 0, self.overall_agressivity, 1, 0, 0, 0, 0, player_stack, *other_stacks]
 
 
-class DQNPlayerV4(DQNPlayer):
+class DQNPlayerV3And4(DQNPlayer):
 
     h_size = 32
 
@@ -290,78 +290,6 @@ class DQNPlayerV4(DQNPlayer):
 
         h1 = tf.layers.dense(self.input_layer, self.h_size, activation=tf.nn.relu,
                              kernel_initializer=tf.contrib.layers.xavier_initializer())
-
-        self.output_layer = tf.layers.dense(h1, self.nb_outputs)
-        self.predict = tf.argmax(self.output_layer, 1)
-
-        self.target_output = tf.placeholder(dtype=tf.float32, shape=[None])
-        self.actions = tf.placeholder(dtype=tf.int32, shape=[None])
-        self.actions_onehot = tf.one_hot(self.actions, self.nb_outputs, dtype=tf.float32)
-        self.QOut = tf.reduce_sum(tf.multiply(self.output_layer, self.actions_onehot), axis=1)
-        self.error = tf.square(self.target_output - self.QOut)
-
-        self.loss = tf.reduce_mean(self.error)
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
-        self.update = self.optimizer.minimize(self.loss)
-
-    def gather_informations(self, hole_card, round_state, valid_actions=None):
-        hand_strength = estimate_hole_card_win_rate(nb_simulation=1000, nb_player=self.nb_players, hole_card=gen_cards(hole_card),
-                                                    community_card=gen_cards(round_state['community_card'])) / self.nb_players
-        street = {'preflop': 0, 'flop': 0, 'turn': 0, 'river': 0, round_state['street']: 1}
-
-        pots = sum([round_state['pot']['main']['amount']] + [pot['amount'] for pot in round_state['pot']['side']])
-        player_stack = [player['stack'] for player in round_state['seats'] if player['uuid'] == self.uuid][0] / self.start_stack
-        other_stacks = [player['stack'] / self.start_stack for player in round_state['seats'] if player['uuid'] != self.uuid]
-
-        call_amount_in_live = valid_actions[1]['amount'] if valid_actions[1]['amount'] > 0 else valid_actions[2]['amount']['min']
-        self.pot_odds = pots / call_amount_in_live
-        self.latest_ehs = hand_strength
-        round_ratio = round_state['round_count'] / self.max_round
-
-        return [hand_strength, pots, self.overall_agressivity, round_ratio, *list(street.values()), player_stack, *other_stacks]
-
-    @staticmethod
-    def select_action(valid_actions, action_idx):
-        actions = {
-            0: (valid_actions[0]['action'], valid_actions[0]['amount']),
-            1: (valid_actions[1]['action'], valid_actions[1]['amount']),
-            2: (valid_actions[2]['action'], valid_actions[2]['amount']['min']),
-            3: (valid_actions[2]['action'], valid_actions[2]['amount']['max']),
-            4: (valid_actions[2]['action'], valid_actions[2]['amount']['min'] + valid_actions[2]['amount']['max'] // 2),
-        }
-
-        action = actions[action_idx]
-
-        if action[1] == -1:
-            action = actions[1]
-        elif action_idx == 0 and actions[1][1] == 0:
-            action = actions[1]
-
-        return action_idx, action[0], action[1]
-
-    def update_inputs(self, game_result):
-        table = game_result['table']
-        player_stack = [player.stack for player in table.seats.players if player.uuid == self.uuid][0] / self.start_stack
-        other_stacks = [player.stack / self.start_stack for player in table.seats.players if player.uuid != self.uuid]
-        return [self.latest_ehs, 0, self.overall_agressivity, 1, 0, 0, 0, 0, player_stack, *other_stacks]
-
-
-class DQNPlayerV3(DQNPlayer):
-
-    h_size = 32
-
-    def __init__(self, learning_rate, discount, nb_players, start_stack, max_round, custom_uuid=None, load=False):
-        super().__init__(learning_rate, discount, nb_players, start_stack, max_round, version=5, nb_inputs=9+(nb_players-1),
-                         nb_outputs=5, custom_uuid=custom_uuid, load=load)
-
-        self.input_layer = tf.placeholder(dtype=tf.float32, shape=[None, self.nb_inputs])
-
-        h1 = tf.layers.dense(self.input_layer, self.h_size, activation=tf.nn.relu,
-                             kernel_initializer=tf.contrib.layers.xavier_initializer())
-        # h2 = tf.layers.dense(h1, self.h_size * 2, activation=tf.nn.relu,
-        #                      kernel_initializer=tf.contrib.layers.xavier_initializer())
-        # h3 = tf.layers.dense(h2, self.h_size / 2, activation=tf.nn.relu,
-        #                      kernel_initializer=tf.contrib.layers.xavier_initializer())
 
         self.output_layer = tf.layers.dense(h1, self.nb_outputs)
         self.predict = tf.argmax(self.output_layer, 1)
@@ -495,7 +423,7 @@ class DQNPlayerV1(DQNPlayer):
 
     def __init__(self, learning_rate, discount, nb_players, start_stack, max_round, custom_uuid=None, load=False):
         super().__init__(learning_rate, discount, nb_players, start_stack, max_round, version=5, nb_inputs=9+(nb_players-1),
-                         nb_outputs=5, custom_uuid=custom_uuid, load=load)
+                         nb_outputs=4, custom_uuid=custom_uuid, load=load)
 
         self.input_layer = tf.placeholder(dtype=tf.float32, shape=[None, self.nb_inputs])
 
@@ -536,8 +464,7 @@ class DQNPlayerV1(DQNPlayer):
             0: (valid_actions[0]['action'], valid_actions[0]['amount']),
             1: (valid_actions[1]['action'], valid_actions[1]['amount']),
             2: (valid_actions[2]['action'], valid_actions[2]['amount']['min']),
-            3: (valid_actions[2]['action'], valid_actions[2]['amount']['max']),
-            4: (valid_actions[2]['action'], valid_actions[2]['amount']['min'] + valid_actions[2]['amount']['max'] // 2),
+            3: (valid_actions[2]['action'], valid_actions[2]['amount']['max'])
         }
 
         action = actions[action_idx]

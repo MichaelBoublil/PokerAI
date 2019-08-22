@@ -1,3 +1,8 @@
+"""
+Credits: This player model doesn't belong to me, the source code is available on the PyPokerEngine Repository
+link: https://github.com/ishikota/PyPokerEngine/tree/master/examples/players/console_player.py
+"""
+
 import pypokerengine.utils.visualize_utils as U
 from pypokerengine.players import BasePokerPlayer
 

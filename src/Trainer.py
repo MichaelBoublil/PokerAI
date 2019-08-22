@@ -17,7 +17,7 @@ import numpy as np
 import random as rand
 from pypokerengine.api.game import setup_config, start_poker
 
-from DQNPlayer import DQNPlayer, DQNPlayerV5, DQNPlayerV6
+from DQNPlayer import DQNPlayer, DQNPlayerV1, DQNPlayerV2, DQNPlayerV3And4, DQNPlayerV5, DQNPlayerV6
 from random_player import RandomPlayer
 from honest_player import HonestPlayer
 from fish_player import FishPlayer
@@ -265,10 +265,26 @@ class Trainer:
         reward = reward / (self.start_stack * self.nb_players)
         return nb_rounds, reward
 
-    def start_real_game(self, players, file=None):
+    def start_real_game(self, players, ai_version='5'):
+        ai_params = {
+            '3': {
+                'class': DQNPlayerV3And4,
+                'model': '3200'
+            },
+            '4': {
+                'class': DQNPlayerV3And4,
+                'model': '9999'
+            },
+            '5': {
+                'class': DQNPlayerV5,
+                'model': '19999'
+            },
+        }
+        path = './models/v' + ai_version + '/model_v' + ai_version + '-' + ai_params[ai_version]['model'] + '.ckpt'
         tf.reset_default_graph()
-        main_qn = DQNPlayerV5(learning_rate=self.learning_rate, discount=self.y, nb_players=self.nb_players,
-                            start_stack=self.start_stack, max_round=self.max_rounds)
+        main_qn = ai_params[ai_version]['class'](learning_rate=self.learning_rate, discount=self.y,
+                                                 nb_players=self.nb_players, start_stack=self.start_stack,
+                                                 max_round=self.max_rounds)
 
         init = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
@@ -276,11 +292,7 @@ class Trainer:
         with tf.Session() as sess:
             sess.run(init)
             main_qn.set_session(sess)
-            if not file:
-                ckpt = tf.train.get_checkpoint_state(self.path)
-                self.saver.restore(sess, ckpt.model_checkpoint_path)
-            else:
-                self.saver.restore(sess, self.path + file)
+            self.saver.restore(sess, path)
             config = setup_config(max_round=self.max_rounds, initial_stack=self.start_stack, small_blind_amount=5)
             i = 1
             for player in players:
